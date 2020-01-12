@@ -10,6 +10,8 @@ from matplotlib import pyplot as plt
 from matplotlib import patches
 from matplotlib import image as mimg
 from os import chdir
+from copy import deepcopy
+
 
 class Grille:
     """Intermédiaire entre coordonnées par pixels et par cases"""
@@ -60,7 +62,12 @@ class Grille:
     def vider_case(self, cx, cy):
         self.board_mat[cx][cy].set_data([[[0,0,0,0]]])
         fig.canvas.draw()
-        
+    
+    def vider(self):
+        for x in range(self.n):
+            for y in range(self.n):
+                self.vider_case(x, y)
+    
     def clear_highlight(self):
         for x in range(8):
             for y in range(8):
@@ -69,8 +76,55 @@ class Grille:
 
     def draw_pion(self, p):
         """Affiche le pion sur la grille"""
-        print("Drawing a {} on ({};{})".format(p.type, p.x, p.y))
         self.board_mat[p.x][p.y].set_data(p.img)
+
+class Action:
+    def __init__(self, p, x, y, plateau, joueur):
+        self.p = p
+        self.x = x
+        self.y = y
+        self.plateau = plateau.get_copy() #Etat du plateau après l'action
+        plateau.bouger_pion(p, x, y)
+        self.joueur = joueur
+        self.score = 0 #Pour comparer les actions entre elles
+        """
+        roi_joueur = False
+        roi_oppose = False
+        for p in plateau.pions:
+            if p.type=="p":
+                value = 1
+            elif p.type=="c" or p.type=="f":
+                value = 3
+            elif p.type=="t":
+                value=5
+            elif p.type=="q":
+                value=9
+            elif p.type=="k":
+                if p.color == joueur:
+                    roi_joueur = True
+                else:
+                    roi_oppose = True
+            self.score += value
+        if not roi_oppose:
+            self.score = 100
+        if not roi_joueur:
+            self.score = -100
+        """
+
+    def next_rec(self, n):
+        self.next_actions = self.plateau.get_actions(self.joueur)
+        if n > 0:
+            for a in self.next_actions:
+                a.next_rec(n-1)
+    
+    def get_rec(self):
+        if self.next_actions != None:
+            arr = []
+            for a in self.actions:
+                arr.append(a.get_rec())
+            return arr
+        else:
+            return self
 
 class Pion:
     """Représente chaque pion : position, type et couleur"""
@@ -78,6 +132,8 @@ class Pion:
         self.x = x
         self.y = y
         self.type = type
+        if self.type == "p":
+            self.moved = False
         self.color = color
         
         if color == "b": #Si pion noir
@@ -87,33 +143,47 @@ class Pion:
         si += "pcftqk".find(self.type)
         self.img=sprites[si]
     
-    def get_mvts(self, plateau, joueur):
-        if self.type == "p":
+    def get_mvts(self, plateau):
+        """Donne tous les mouvements possibles du pion sur le plateau"""
+        if self.type == "p": #Pion
             if self.color == "w":
-                pos = [self.x, self.y+1]
+                diags = [[self.x-1, self.y+1],[self.x+1, self.y+1]] #Mouvements possibles de diagonales
+                faces = [[self.x, self.y+1]] #Mouvements possibles de face
+                if not self.moved: #Si le pion n'a pas encore bougé de la partie
+                    faces.append([self.x, self.y+2])
             else:
-                pos = [self.x, self.y-1]
-            pion = plateau.get_pion(pos[0], pos[1])
-            if pion == None or pion.color != joueur:
-                return [pos]
-            else:
-                return []
+                diags = [[self.x-1, self.y-1], [self.x+1, self.y-1]]
+                faces = [[self.x, self.y-1]] #Mouvements possibles de 
+                if not self.moved:
+                    faces.append([self.x, self.y-2])
+            pos = [] #Position de déplacement validées
+            for d in diags:
+                if verif_case(d[0], d[1]): #Si la case est sur le plateau 
+                    pion = plateau.get_pion(d[0],d[1])
+                    if pion != None and pion.color != self.color: #Si il y a un pion ennemi
+                        pos.append(d)
+            for f in faces: 
+                if verif_case(f[0],f[1]):
+                    pion = plateau.get_pion(f[0], f[1])
+                    if pion == None or pion.color != self.color: #Si il n'y a pas de pion allié
+                        pos.append(f)
+            return pos
         elif self.type == "t": #Tour
             pos = []
             dir = [[1,0],[-1,0],[0,1],[0,-1]] #4 directions possibles
             for d in dir:
-                x,y = self.x+d[0],self.y+d[1]
-                while verif_case(x,y):
+                x,y = self.x+d[0],self.y+d[1] #Projection de position
+                while verif_case(x,y): #Tant que (x, y) est sur le plateau
                     pion = plateau.get_pion(x, y)
                     if pion != None: #Si il y a un pion
-                        if pion.color != joueur: #Si il n'est pas allié
+                        if pion.color != self.color: #Si il n'est pas allié
                             pos.append([x,y])
                         break
                     pos.append([x,y])
                     x += d[0]
                     y += d[1]
             return pos
-        elif self.type == "c":
+        elif self.type == "c": #Cavalier
             l = [-2,-1,1,2]
             mvts = [[x,y] for x in l for y in l if abs(x)!=abs(y)]
             pos = []
@@ -122,10 +192,10 @@ class Pion:
                 y = self.y + m[1]
                 if verif_case(x,y):
                     pion = plateau.get_pion(x, y)
-                    if pion == None or pion.color != joueur:
-                        pos.append(x, y)
+                    if pion == None or pion.color != self.color:
+                        pos.append([x, y])
             return pos
-        elif self.type == "f":
+        elif self.type == "f": #Fou
             dir = [[1,1],[-1,1],[-1,-1],[1,-1]]
             pos = []
             for d in dir:
@@ -133,7 +203,7 @@ class Pion:
                 while verif_case(x,y):
                     pion = plateau.get_pion(x, y)
                     if pion != None:
-                        if pion.color != joueur:
+                        if pion.color != self.color:
                             pos.append([x,y])
                         break
                     pos.append([x,y])
@@ -146,12 +216,12 @@ class Pion:
             for m in mvts:
                 x = self.x + m[0]
                 y = self.y + m[1]
-                if verif_case(x, y): #Si la case est dans les limites
+                if verif_case(x, y):
                     pion = plateau.get_pion(x, y)
-                    if pion == None or pion.color != joueur: #Si il n'y a pas de pion allié
+                    if pion == None or pion.color != self.color:
                         pos.append([self.x + m[0], self.y + m[1]])
             return pos
-        elif self.type == "q":
+        elif self.type == "q": #Dame
             pos = []
             dir = [[1,0],[1,-1],[0,-1],[-1,-1],[-1,0],[-1,1],[0,1],[1,1]]
             for d in dir:
@@ -195,20 +265,42 @@ class Plateau:
         return None
     
     def bouger_pion(self, p1, x2, y2):
+        """Déplace le pion p1 vers (x2, y2), supprime éventuellement un pion adverse"""
+        global game_ended
         p2 = self.get_pion(x2, y2)
         if p2 != None:
             i = self.pions.index(p2)
             self.pions.pop(i)
             if p2.type == "k":
-                #                   WIN
+                game_ended = True
         grille.vider_case(p1.x, p1.y)
         p1.x = x2
         p1.y = y2
+        if p1.type == "p":
+            p1.moved = True
         grille.draw_pion(p1)
         fig.canvas.draw()
+        
+    def get_actions(self, joueur):
+        """Donne toutes les actions possibles pour le joueur sur le plateau"""
+        actions = []
+        if joueur == "w":
+            j2 = "b"
+        else:
+            j2 = "w"
+        for p in self.pions:
+            if p.color == joueur:
+                for m in p.get_mvts(self):
+                    actions.append(Action(p, m[0], m[1], self.get_copy(), j2))
+        return actions
+        
+    def get_copy(self):
+        copy = Plateau()
+        copy.pions = deepcopy(self.pions)
+        return copy
 
 class Selection:
-    def __init__(self, cx, cy, plateau, joueur):
+    def __init__(self, cx, cy, plateau):
         self.x = cx
         self.y = cy
         self.p = None
@@ -216,7 +308,7 @@ class Selection:
         if self.x != None and self.y != None:
             self.p = plateau.get_pion(cx, cy)
             if self.p != None:
-                self.mvts = self.p.get_mvts(plateau, joueur)
+                self.mvts = self.p.get_mvts(plateau)
     
     def exists(self):
          return self.x != None and self.y != None
@@ -265,6 +357,9 @@ def load_sprites(dir="/home/robin/workspace/python/ipt/chess/sprites"):
 
 def onclick(event):
     """Quand le joueur clique sur l'écran"""
+    if game_ended:
+        plt.close()
+        exit
     global sel #pas le choix
     cx, cy = grille.get_case(event.xdata, event.ydata)
     sel = update_selection(cx, cy)
@@ -274,22 +369,33 @@ def update_selection(cx=None, cy=None):
     global joueur
     """Efface le surlignage de la sélection et affiche la nouvelle en fonction de la case sur laquelle on clique. Retourne un objet Selection pour être stocké dans la variable globale selection"""
     grille.clear_highlight()
-    new = Selection(cx, cy, plateau, joueur)
+    new = Selection(cx, cy, plateau)
     if new.p != None: #Si il y a un pion sur la case cliqué
         if new.p.color == joueur: #Si il est allié
             if new.p != sel.p: #Si il est pas déjà sélectionné
                 return new #Nouvelle sélection
             else:
-                return Selection(None, None, plateau, joueur) #Déselectionne
+                return Selection(None, None, plateau) #Déselectionne
     if [cx, cy] in sel.mvts: #Si la case cliquée est dans les mouvements possibles 
         plateau.bouger_pion(sel.p, cx, cy)
         if joueur == "w":
             joueur = "b"
         else:
             joueur = "w"
-        return Selection(None, None, plateau, joueur) #Déselectionne
+        return Selection(None, None, plateau ) #Déselectionne
     return sel
     
+def get_actions_rec(plateau, joueur, n):
+    actions_plateau = plateau.get_actions(joueur)
+    actions_rec = []
+    if joueur == "w":
+        joueur == "b"
+    else:
+        joueur == "w"
+    for a in actions_plateau:
+        actions_rec.append(get_actions_rec(a.plateau, joueur, n-1))
+    if n == 1:
+        return actions_rec
     
 def verif_case(x, y):
     return x >= 0 and x < 8 and y >= 0 and y < 8
@@ -307,7 +413,8 @@ plateau.draw(grille)
 plt.show()
 
 joueur = "w"
-sel = Selection(None, None, plateau, joueur)
+sel = Selection(None, None, plateau)
+game_ended = False
 
 
 
