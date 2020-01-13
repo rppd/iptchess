@@ -11,6 +11,7 @@ from matplotlib import patches
 from matplotlib import image as mimg
 from os import chdir
 from copy import deepcopy
+import time
 
 
 class Grille:
@@ -57,11 +58,9 @@ class Grille:
             color=[255,255,255]
         img = [[color]*int(self.w)]*int(self.h)
         self.bg_mat[cx][cy].set_data(img)
-        fig.canvas.draw()
         
     def vider_case(self, cx, cy):
         self.board_mat[cx][cy].set_data([[[0,0,0,0]]])
-        fig.canvas.draw()
     
     def vider(self):
         for x in range(self.n):
@@ -72,7 +71,6 @@ class Grille:
         for x in range(8):
             for y in range(8):
                 self.bg_mat[x][y].set_data([[[255,255,255]]])
-        fig.canvas.draw()
 
     def draw_pion(self, p):
         """Affiche le pion sur la grille"""
@@ -165,7 +163,7 @@ class Pion:
             for f in faces: 
                 if verif_case(f[0],f[1]):
                     pion = plateau.get_pion(f[0], f[1])
-                    if pion == None or pion.color != self.color: #Si il n'y a pas de pion allié
+                    if pion == None: #Si il n'y a pas de pion
                         pos.append(f)
             return pos
         elif self.type == "t": #Tour
@@ -240,46 +238,51 @@ class Pion:
 class Plateau:
     def __init__(self):
         self.pions = []
+        self.pionsliste = []
+        for x in range(8):
+            self.pions.append([])
+            for y in range(8):
+                self.pions[x].append(None)
         for i in range(8):
-            self.pions.append(Pion(i,0,backrow[i],"w"))
-            self.pions.append(Pion(i,7,backrow[i],"b"))
-            self.pions.append(Pion(i,1,"p","w"))
-            self.pions.append(Pion(i,6,"p","b"))                    
+            self.add_pion(Pion(i,0,backrow[i],"w"))
+            self.add_pion(Pion(i,7,backrow[i],"b"))
+            self.add_pion(Pion(i,1,"p","w"))
+            self.add_pion(Pion(i,6,"p","b"))
     
     def draw(self, grille):
         """Affiche tous les pions"""
-        for p in self.pions:
-            grille.draw_pion(p)
+        grille.clear_highlight()
+        for x in range(8):
+            for y in range(8):
+                self.draw_c(x, y, grille)
             
     def draw_c(self, cx, cy, grille):
         """Affiche le pion situé sur la case donnée"""
         p = self.get_pion(cx, cy)
         if p != None:
             grille.draw_pion(p)
-     
+        else:
+            grille.vider_case(cx, cy)
+ 
     def get_pion(self, cx, cy):
         """Retourne l'objet Pion situé sur la case"""
-        for p in self.pions:
-            if p.x == cx and p.y == cy:
-                return p
-        return None
+        return self.pions[cx][cy]
     
     def bouger_pion(self, p1, x2, y2):
         """Déplace le pion p1 vers (x2, y2), supprime éventuellement un pion adverse"""
         global game_ended
         p2 = self.get_pion(x2, y2)
         if p2 != None:
-            i = self.pions.index(p2)
-            self.pions.pop(i)
+            i = self.pionsliste.index(p2)
+            self.pionsliste.pop(i)
             if p2.type == "k":
                 game_ended = True
-        grille.vider_case(p1.x, p1.y)
+        self.pions[x2][y2] = p1
+        self.pions[p1.x][p1.y] = None
         p1.x = x2
         p1.y = y2
         if p1.type == "p":
             p1.moved = True
-        grille.draw_pion(p1)
-        fig.canvas.draw()
         
     def get_actions(self, joueur):
         """Donne toutes les actions possibles pour le joueur sur le plateau"""
@@ -288,16 +291,37 @@ class Plateau:
             j2 = "b"
         else:
             j2 = "w"
-        for p in self.pions:
+        for p in self.pionsliste:
+            start = time.time()
             if p.color == joueur:
-                for m in p.get_mvts(self):
+                mvts = p.get_mvts(self)
+                for m in mvts:
                     actions.append(Action(p, m[0], m[1], self.get_copy(), j2))
+            print(p.type, "{:.4f}".format(time.time()-start), len(mvts), len(actions))
         return actions
         
     def get_copy(self):
         copy = Plateau()
         copy.pions = deepcopy(self.pions)
         return copy
+    
+    def add_pion(self, p):
+        """Ajoute un pion au plateau"""
+        self.pions[p.x][p.y] = p
+        self.pionsliste.append(p)
+    
+    def disp(self):
+        print("-------------------")
+        for x in range(8):
+            line = ""
+            for y in range(8):
+                p = self.pions[x][y]
+                if p == None:
+                    line += "n "
+                else:
+                    line += p.type+" "
+            print(line)
+                    
 
 class Selection:
     def __init__(self, cx, cy, plateau):
@@ -383,6 +407,7 @@ def update_selection(cx=None, cy=None):
         else:
             joueur = "w"
         return Selection(None, None, plateau ) #Déselectionne
+    plateau.draw(grille)
     return sel
     
 def get_actions_rec(plateau, joueur, n):
@@ -399,6 +424,10 @@ def get_actions_rec(plateau, joueur, n):
     
 def verif_case(x, y):
     return x >= 0 and x < 8 and y >= 0 and y < 8
+
+
+def printdelta(start, label):
+    print(label, "{:.4f}".format(time.time()-start))
 
 sprites = load_sprites()
 
